@@ -1,0 +1,10 @@
+[theme]
+primaryColor = "#00693E"        # Vert WWF
+backgroundColor = "#FFFFFF"      # Blanc
+secondaryBackgroundColor = "#F5F5F5"  # Gris très clair
+textColor = "#262730"           # Noir/Gris foncé
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
