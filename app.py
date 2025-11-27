@@ -23,6 +23,19 @@ COLOR_MEDIUM = "#ffffcc"   # Jaune
 COLOR_HIGH = "#ccffcc"     # Vert clair
 COLOR_NA = "#f0f0f0"       # Gris
 
+# Fonction pour afficher un encart info avec texte en gras avant ":"
+def info_bold(text):
+    if ":" in text:
+        parts = text.split(":", 1)
+        formatted = f"<strong>{parts[0]}</strong> :{parts[1]}"
+    else:
+        formatted = text
+    st.markdown(f"""
+    <div style="background-color: #e8f4f8; border-left: 4px solid #31708f; padding: 12px 16px; border-radius: 4px; color: #31708f; margin: 8px 0;">
+        {formatted}
+    </div>
+    """, unsafe_allow_html=True)
+
 # Ordre d'apparition fixe
 ORDRE_INTENSITE = ['Incrémentale', 'Radicale', 'Disruptive']
 ORDRE_NATURE = ['Technologique', 'Usage', 'Organisationnelle']
@@ -158,8 +171,8 @@ with col_logo1:
 with col_title:
     st.title("Tableau de bord des innovations")
     st.markdown(f"""
-    Cette visualisation presente **{len(df)} innovations** evaluees selon **{len(criteres)} criteres**.
-    Les echelles de notation varient selon les criteres.
+    Cette visualisation présente **{len(df)} innovations** évaluées selon **{len(criteres)} critères**.
+    Les échelles de notation varient selon les critères.
     """)
 
 with col_logo2:
@@ -191,7 +204,7 @@ else:
 st.sidebar.markdown(f"**{len(df_filtered)}** innovations affichées sur {len(df)}")
 
 # --- ONGLETS ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Vue d'ensemble", "Portefeuille d'innovations","Comparaison", "Analyse par critère", "Donnees", "Dictionnaire", "Veille"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Vue d'ensemble", "Portefeuille d'innovations", "Comparaison", "Analyse par critère", "Données", "Dictionnaire", "Veille", "Retour d'expérience"])
 
 # ================== ONGLET 1: VUE D'ENSEMBLE ==================
 with tab1:
@@ -328,12 +341,18 @@ with tab1:
 
         # Creer une matrice normalisee (valeur / max du critere) pour les couleurs
         # et garder les valeurs originales pour l'affichage
+        # Utiliser np.nan pour les valeurs N/A au lieu de -1
         df_heatmap_normalized = df_heatmap.copy()
         for col in df_heatmap.columns:
             max_crit = max_par_critere.get(col, df_heatmap[col].replace(-1, np.nan).max())
             if max_crit and max_crit > 0:
                 df_heatmap_normalized[col] = df_heatmap[col].apply(
-                    lambda x: x / max_crit if x >= 0 else -1
+                    lambda x: x / max_crit if x >= 0 else np.nan
+                )
+            else:
+                # Si pas de max, remplacer les -1 par nan
+                df_heatmap_normalized[col] = df_heatmap[col].apply(
+                    lambda x: x if x >= 0 else np.nan
                 )
 
         # Creer une matrice de customdata avec le nom complet du critere et le max pour chaque cellule
@@ -346,14 +365,18 @@ with tab1:
             customdata_matrix.append(row_data)
         customdata_matrix = np.array(customdata_matrix)
 
-        # Colorscale avec couleurs plus contrastees (rouge fonce -> jaune -> vert fonce)
+        # Creer le texte d'affichage (valeurs originales, vide pour N/A)
+        text_matrix = df_heatmap.values.copy().astype(object)
+        text_matrix = np.where(text_matrix == -1, '', text_matrix)
+
+        # Colorscale sobre (blanc/bleu tres clair -> rouge)
+        # L'echelle va de 0 a 1, les valeurs NaN seront en gris clair
         colorscale = [
-            [0, '#d9d9d9'],       # -1 (N/A) = gris
-            [0.001, '#d73027'],   # 0% du max = rouge fonce
-            [0.25, '#fc8d59'],    # 25% = orange
-            [0.5, '#fee08b'],     # 50% = jaune
-            [0.75, '#91cf60'],    # 75% = vert clair
-            [1, '#1a9850']        # 100% du max = vert fonce
+            [0, '#f7fbff'],       # 0% = blanc bleuté très clair
+            [0.25, '#c6dbef'],    # 25% = bleu très clair
+            [0.5, '#fcbba1'],     # 50% = rose saumon clair
+            [0.75, '#fb6a4a'],    # 75% = rouge orangé
+            [1, '#cb181d']        # 100% = rouge foncé
         ]
 
         fig_heat = go.Figure(data=go.Heatmap(
@@ -361,19 +384,34 @@ with tab1:
             x=labels_tronques,
             y=df_heatmap.index,
             colorscale=colorscale,
-            zmin=-1,
+            zmin=0,
             zmax=1,
-            text=df_heatmap.values,  # Afficher les valeurs originales
+            text=text_matrix,  # Afficher les valeurs originales (vide pour N/A)
             texttemplate='%{text}',
             textfont={"size": 10, "color": "black"},
+            hoverongaps=False,
             colorbar=dict(
-                title="Intensite",
+                title="Intensité",
                 tickvals=[0, 0.25, 0.5, 0.75, 1],
                 ticktext=['0%', '25%', '50%', '75%', '100%']
             ),
             customdata=customdata_matrix,
             hovertemplate='<b>%{y}</b><br>%{customdata}<br>Score: %{text}<extra></extra>'
         ))
+
+        # Ajouter une trace invisible pour afficher les cellules N/A en gris
+        # Creer un masque pour les valeurs N/A
+        na_mask = df_heatmap.values == -1
+        if na_mask.any():
+            z_na = np.where(na_mask, 0.5, np.nan)
+            fig_heat.add_trace(go.Heatmap(
+                z=z_na,
+                x=labels_tronques,
+                y=df_heatmap.index,
+                colorscale=[[0, '#e0e0e0'], [1, '#e0e0e0']],
+                showscale=False,
+                hoverinfo='skip'
+            ))
 
         fig_heat.update_layout(
             height=600,
@@ -673,38 +711,78 @@ with tab3:
         # Couleurs pour chaque innovation
         innovation_colors = [WWF_GREEN, WWF_ORANGE, '#7A9D96', '#4A7C59', '#E89C3C']
 
-        # Calculer le max global pour l'echelle du radar
-        max_val_radar = df_filtered[criteres].max().max()
+        # Recuperer les max par critere depuis le dictionnaire
+        max_par_critere_radar = get_max_par_critere()
+
+        # Calculer les max effectifs pour chaque critere (dictionnaire ou max observe)
+        max_par_critere_effectif = {}
+        for c in criteres:
+            max_dict = max_par_critere_radar.get(c, None)
+            max_obs = df_filtered[c].max()
+            if max_dict and max_dict > 0:
+                max_par_critere_effectif[c] = max_dict
+            elif pd.notna(max_obs) and max_obs > 0:
+                max_par_critere_effectif[c] = max_obs
+            else:
+                max_par_critere_effectif[c] = 1  # Eviter division par zero
+
+        # Tronquer les noms de criteres pour l'affichage
+        def truncate_label_radar(label, max_len=20):
+            if len(label) > max_len:
+                return label[:max_len-2] + ".."
+            return label
+
+        criteres_tronques = [truncate_label_radar(c) for c in criteres]
 
         for idx, (_, row) in enumerate(df_compare.iterrows()):
-            values = [row[c] for c in criteres]
-            values_filled = [v if pd.notna(v) else 0 for v in values]
+            # Valeurs originales
+            values_orig = [row[c] for c in criteres]
+            # Valeurs normalisees (0 a 100%) par rapport au max de chaque critere
+            values_normalized = []
+            for i, c in enumerate(criteres):
+                val = values_orig[i]
+                if pd.notna(val):
+                    values_normalized.append((val / max_par_critere_effectif[c]) * 100)
+                else:
+                    values_normalized.append(0)
+
+            # Texte pour le hover (valeur originale / max)
+            hover_texts = []
+            for i, c in enumerate(criteres):
+                val = values_orig[i]
+                max_c = max_par_critere_effectif[c]
+                if pd.notna(val):
+                    hover_texts.append(f"{c}<br>Score: {int(val)}/{int(max_c)} ({values_normalized[i]:.0f}%)")
+                else:
+                    hover_texts.append(f"{c}<br>Score: N/A")
 
             fig_radar.add_trace(go.Scatterpolar(
-                r=values_filled + [values_filled[0]],  # Fermer le polygone
-                theta=criteres + [criteres[0]],
+                r=values_normalized + [values_normalized[0]],  # Fermer le polygone
+                theta=criteres_tronques + [criteres_tronques[0]],
                 fill='toself',
                 name=row["Innovation identifiée"],
-                line_color=innovation_colors[idx % len(innovation_colors)]
+                line_color=innovation_colors[idx % len(innovation_colors)],
+                customdata=hover_texts + [hover_texts[0]],
+                hovertemplate='<b>%{customdata}</b><extra></extra>'
             ))
-
-        # Creer les tickvals dynamiques
-        tick_vals_radar = list(range(int(max_val_radar) + 1))
 
         fig_radar.update_layout(
             polar=dict(
                 radialaxis=dict(
                     visible=True,
-                    range=[0, max_val_radar],
-                    tickvals=tick_vals_radar
+                    range=[0, 100],
+                    tickvals=[0, 25, 50, 75, 100],
+                    ticktext=['0%', '25%', '50%', '75%', '100%']
                 )
             ),
             showlegend=True,
             height=600,
-            title="Comparaison multi-critères"
+            title="Comparaison multi-critères (normalisée par critère)"
         )
 
         st.plotly_chart(fig_radar, use_container_width=True)
+
+        st.caption("Chaque axe est normalisé par rapport au maximum possible de son critère (0% = 0, 100% = max du critère)")
 
         # Tableau de comparaison
         st.markdown("### Tableau de comparaison détaillé")
@@ -791,19 +869,19 @@ with tab4:
                 for innov in innovations:
                     st.markdown(f"- {innov}")
 
-    # Statistiques globales avec mini-echelles
-    st.subheader("Score moyen par critere")
+    # Statistiques globales avec mini-échelles
+    st.subheader("Score moyen par critère")
 
     with st.expander("Comment lire ces scores ?"):
         st.markdown("""
         **Calcul du score moyen :**
-        - Chaque innovation est evaluee sur plusieurs criteres
-        - Le score moyen correspond a la **moyenne arithmetique** des scores attribues a toutes les innovations pour ce critere
-        - L'echelle de notation varie selon les criteres (ex: 0-2 ou 0-1)
+        - Chaque innovation est évaluée sur plusieurs critères
+        - Le score moyen correspond à la **moyenne arithmétique** des scores attribués à toutes les innovations pour ce critère
+        - L'échelle de notation varie selon les critères (ex: 0-2 ou 0-1)
 
-        **Lecture de l'echelle :**
-        - Le curseur noir indique la position de la moyenne sur l'echelle du critere
-        - Les valeurs min et max affichees correspondent aux bornes reelles du critere
+        **Lecture de l'échelle :**
+        - Le curseur noir indique la position de la moyenne sur l'échelle du critère
+        - Les valeurs min et max affichées correspondent aux bornes réelles du critère
         """)
 
     cols_stats = st.columns(len(criteres) if len(criteres) <= 4 else 4)
@@ -911,7 +989,7 @@ with tab6:
 
                 # Afficher la description si disponible
                 if col3_val and col3_val != "nan" and len(col3_val) > 0:
-                    st.info(col3_val)
+                    info_bold(col3_val)
                     current_note = col3_val
 
             # Afficher les modalités (col1 rempli, col2 rempli)
@@ -924,7 +1002,7 @@ with tab6:
         st.markdown("---")
         st.markdown("**Fichier source** : Stats du rapport.xlsx (feuille 'Dictionnaire des variables')")
     else:
-        st.warning("Le dictionnaire des variables n'a pas pu etre charge.")
+        st.warning("Le dictionnaire des variables n'a pas pu être chargé.")
 
 # ================== ONGLET 7: VEILLE ==================
 with tab7:
@@ -932,117 +1010,123 @@ with tab7:
 
     st.markdown("""
     Cet onglet regroupe les **ressources externes** utiles pour la veille sur l'innovation
-    et les donnees environnementales. Cliquez sur les cartes pour acceder aux sources.
+    et les données environnementales. Cliquez sur les cartes pour accéder aux sources.
     """)
 
+    # Fichiers CSV
+    fichier_ressources = "ressources_validees.csv"
+    fichier_suggestions = "suggestions_veille.csv"
+    import os
+    from datetime import datetime
+
+    # Palette de couleurs pour les cartes (alternance)
+    COULEURS_CARTES = [
+        {"gradient": "linear-gradient(135deg, #00693E 0%, #4A7C59 100%)", "btn": "#00693E"},
+        {"gradient": "linear-gradient(135deg, #2E7D9A 0%, #7A9D96 100%)", "btn": "#2E7D9A"},
+        {"gradient": "linear-gradient(135deg, #F07E16 0%, #E89C3C 100%)", "btn": "#F07E16"},
+        {"gradient": "linear-gradient(135deg, #8B4513 0%, #A0522D 100%)", "btn": "#8B4513"},
+    ]
+
+    # Initialiser le fichier des ressources validées s'il n'existe pas
+    if not os.path.exists(fichier_ressources):
+        ressources_initiales = pd.DataFrame({
+            'Nom': ['Innovation Example Repository - WWF', 'Catalogue - OFB'],
+            'URL': [
+                'https://sites.google.com/impacthub.net/innovation-wwf/our-impact/stories-repository?authuser=0',
+                'https://data.ofb.fr/catalogue/Donnees-geographiques-OFB/fre/catalog.search#/home'
+            ],
+            'Description': [
+                'Plateforme Innovation Hub présentant des innovations du réseau WWF. Découvrez des cas concrets d\'innovations mises en œuvre pour la conservation.',
+                'Catalogue de données géographiques de l\'Office Français de la Biodiversité (OFB). Accès aux données environnementales et cartographiques nationales.'
+            ],
+            'Source': ['Impact Hub / WWF', 'Office Français de la Biodiversité'],
+            'Date_validation': [datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m-%d")]
+        })
+        ressources_initiales.to_csv(fichier_ressources, index=False)
+
+    # Fonction pour générer une carte de ressource
+    def afficher_carte_ressource(nom, url, description, source, couleur_idx):
+        couleur = COULEURS_CARTES[couleur_idx % len(COULEURS_CARTES)]
+        st.markdown(f"""
+        <div style="
+            background: {couleur['gradient']};
+            padding: 25px;
+            border-radius: 15px;
+            color: white;
+            min-height: 250px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        ">
+            <h3 style="margin-top:0; color:white; font-size: 18px;">{nom}</h3>
+            <p style="font-size: 14px; line-height: 1.6;">
+                {description}
+            </p>
+            <p style="font-size: 12px; opacity: 0.8; margin-bottom: 15px;">
+                Source : {source}
+            </p>
+            <a href="{url}"
+               target="_blank"
+               style="
+                   background-color: white;
+                   color: {couleur['btn']};
+                   padding: 10px 20px;
+                   border-radius: 25px;
+                   text-decoration: none;
+                   font-weight: bold;
+                   display: inline-block;
+               ">
+                Accéder à la ressource
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("---")
 
-    # Section des ressources
+    # Section des ressources validées
     st.markdown("### Ressources disponibles")
 
-    # Creer des cartes visuelles pour les ressources
-    col_res1, col_res2 = st.columns(2)
+    # Charger et afficher les ressources validées
+    if os.path.exists(fichier_ressources):
+        df_ressources = pd.read_csv(fichier_ressources)
 
-    with col_res1:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #00693E 0%, #4A7C59 100%);
-            padding: 25px;
-            border-radius: 15px;
-            color: white;
-            height: 280px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <h3 style="margin-top:0; color:white;">Innovation Example Repository - WWF</h3>
-            <p style="font-size: 14px; line-height: 1.6;">
-                Plateforme Innovation Hub presentant des innovations du reseau WWF.
-                Decouvrez des cas concrets d'innovations mises en oeuvre pour la conservation.
-            </p>
-            <p style="font-size: 12px; opacity: 0.8; margin-bottom: 15px;">
-                Source : Impact Hub / WWF
-            </p>
-            <a href="https://sites.google.com/impacthub.net/innovation-wwf/our-impact/stories-repository?authuser=0"
-               target="_blank"
-               style="
-                   background-color: white;
-                   color: #00693E;
-                   padding: 10px 20px;
-                   border-radius: 25px;
-                   text-decoration: none;
-                   font-weight: bold;
-                   display: inline-block;
-               ">
-                Acceder a la ressource
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_res2:
-        st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #2E7D9A 0%, #7A9D96 100%);
-            padding: 25px;
-            border-radius: 15px;
-            color: white;
-            height: 280px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        ">
-            <h3 style="margin-top:0; color:white;">Catalogue OFB</h3>
-            <p style="font-size: 14px; line-height: 1.6;">
-                Catalogue de donnees geographiques de l'Office Francais de la Biodiversite (OFB).
-                Acces aux donnees environnementales et cartographiques nationales.
-            </p>
-            <p style="font-size: 12px; opacity: 0.8; margin-bottom: 15px;">
-                Source : Office Francais de la Biodiversite
-            </p>
-            <a href="https://data.ofb.fr/catalogue/Donnees-geographiques-OFB/fre/catalog.search#/home"
-               target="_blank"
-               style="
-                   background-color: white;
-                   color: #2E7D9A;
-                   padding: 10px 20px;
-                   border-radius: 25px;
-                   text-decoration: none;
-                   font-weight: bold;
-                   display: inline-block;
-               ">
-                Acceder a la ressource
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
+        if not df_ressources.empty:
+            # Afficher les cartes en grille de 2 colonnes
+            cols = st.columns(2)
+            for idx, row in df_ressources.iterrows():
+                with cols[idx % 2]:
+                    afficher_carte_ressource(
+                        row['Nom'],
+                        row['URL'],
+                        row['Description'],
+                        row['Source'],
+                        idx
+                    )
+    else:
+        st.info("Aucune ressource disponible pour le moment.")
 
     st.markdown("---")
 
-    # Section pour ajouter des ressources
-    st.markdown("### Suggerer une ressource")
+    # Section pour suggérer des ressources
+    st.markdown("### Suggérer une ressource")
 
-    # Formulaire de suggestion avec sauvegarde dans un fichier CSV
     with st.form("formulaire_suggestion", clear_on_submit=True):
-        nom_ressource = st.text_input("Nom de la ressource *", placeholder="Ex: Portail de donnees biodiversite")
+        nom_ressource = st.text_input("Nom de la ressource *", placeholder="Ex: Portail de données biodiversité")
         url_ressource = st.text_input("URL *", placeholder="https://...")
-        description_ressource = st.text_area("Description", placeholder="Decrivez brievement cette ressource...")
-        source_ressource = st.text_input("Source / Organisme", placeholder="Ex: Ministere de l'Environnement")
+        description_ressource = st.text_area("Description", placeholder="Décrivez brièvement cette ressource...")
+        source_ressource = st.text_input("Source / Organisme", placeholder="Ex: Ministère de l'Environnement")
 
         submitted = st.form_submit_button("Envoyer la suggestion")
 
         if submitted:
             if nom_ressource and url_ressource:
-                # Fichier CSV pour stocker les suggestions
-                fichier_suggestions = "suggestions_veille.csv"
-                from datetime import datetime
-                import os
-
-                # Creer le DataFrame avec la nouvelle suggestion
                 nouvelle_suggestion = pd.DataFrame({
                     'Date': [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
                     'Nom': [nom_ressource],
                     'URL': [url_ressource],
-                    'Description': [description_ressource],
-                    'Source': [source_ressource],
-                    'Statut': ['En attente']
+                    'Description': [description_ressource if description_ressource else ""],
+                    'Source': [source_ressource if source_ressource else ""]
                 })
 
-                # Ajouter au fichier existant ou creer un nouveau fichier
                 if os.path.exists(fichier_suggestions):
                     df_suggestions = pd.read_csv(fichier_suggestions)
                     df_suggestions = pd.concat([df_suggestions, nouvelle_suggestion], ignore_index=True)
@@ -1054,32 +1138,325 @@ with tab7:
             else:
                 st.error("Veuillez remplir au minimum le nom et l'URL de la ressource.")
 
-    # Afficher les suggestions en attente (pour l'administrateur)
-    fichier_suggestions = "suggestions_veille.csv"
-    import os
-    if os.path.exists(fichier_suggestions):
-        with st.expander("Voir les suggestions en attente"):
-            df_suggestions = pd.read_csv(fichier_suggestions)
-            st.dataframe(df_suggestions, use_container_width=True, hide_index=True)
-            st.caption(f"{len(df_suggestions)} suggestion(s) enregistree(s)")
-
-    # Resume des ressources
+    # Section Administration (pour valider les suggestions)
     st.markdown("---")
-    st.markdown("### Resume des ressources")
+    with st.expander("🔧 Administration des ressources"):
+        st.markdown("#### Suggestions en attente de validation")
 
-    df_ressources = pd.DataFrame({
-        'Ressource': ['Innovation Stories - WWF', 'Catalogue OFB'],
-        'Type': ['Innovation', 'Donnees geographiques'],
-        'Organisme': ['WWF / Impact Hub', 'Office Francais de la Biodiversite'],
-        'Accès': ['Gratuit', 'Gratuit']
-    })
+        if os.path.exists(fichier_suggestions):
+            df_suggestions = pd.read_csv(fichier_suggestions)
 
-    st.dataframe(df_ressources, use_container_width=True, hide_index=True)
+            if not df_suggestions.empty:
+                st.dataframe(df_suggestions, use_container_width=True, hide_index=True)
+                st.caption(f"{len(df_suggestions)} suggestion(s) en attente")
+
+                st.markdown("---")
+                st.markdown("#### Valider une suggestion")
+
+                # Sélection de la suggestion à valider
+                suggestions_noms = df_suggestions['Nom'].tolist()
+                suggestion_a_valider = st.selectbox(
+                    "Sélectionnez la suggestion à valider",
+                    options=[""] + suggestions_noms,
+                    key="select_suggestion"
+                )
+
+                col_btn1, col_btn2 = st.columns(2)
+
+                with col_btn1:
+                    if st.button("✅ Valider cette suggestion", type="primary", disabled=not suggestion_a_valider):
+                        if suggestion_a_valider:
+                            # Récupérer les données de la suggestion
+                            suggestion_data = df_suggestions[df_suggestions['Nom'] == suggestion_a_valider].iloc[0]
+
+                            # Ajouter aux ressources validées
+                            nouvelle_ressource = pd.DataFrame({
+                                'Nom': [suggestion_data['Nom']],
+                                'URL': [suggestion_data['URL']],
+                                'Description': [suggestion_data['Description'] if pd.notna(suggestion_data['Description']) else ""],
+                                'Source': [suggestion_data['Source'] if pd.notna(suggestion_data['Source']) else ""],
+                                'Date_validation': [datetime.now().strftime("%Y-%m-%d")]
+                            })
+
+                            if os.path.exists(fichier_ressources):
+                                df_ressources_val = pd.read_csv(fichier_ressources)
+                                df_ressources_val = pd.concat([df_ressources_val, nouvelle_ressource], ignore_index=True)
+                            else:
+                                df_ressources_val = nouvelle_ressource
+
+                            df_ressources_val.to_csv(fichier_ressources, index=False)
+
+                            # Supprimer des suggestions
+                            df_suggestions = df_suggestions[df_suggestions['Nom'] != suggestion_a_valider]
+                            df_suggestions.to_csv(fichier_suggestions, index=False)
+
+                            st.success(f"✅ '{suggestion_a_valider}' a été validée et ajoutée aux ressources !")
+                            st.rerun()
+
+                with col_btn2:
+                    if st.button("❌ Rejeter cette suggestion", disabled=not suggestion_a_valider):
+                        if suggestion_a_valider:
+                            df_suggestions = df_suggestions[df_suggestions['Nom'] != suggestion_a_valider]
+                            df_suggestions.to_csv(fichier_suggestions, index=False)
+                            st.warning(f"'{suggestion_a_valider}' a été rejetée.")
+                            st.rerun()
+            else:
+                st.info("Aucune suggestion en attente.")
+        else:
+            st.info("Aucune suggestion en attente.")
+
+        st.markdown("---")
+        st.markdown("#### Gérer les ressources existantes")
+
+        if os.path.exists(fichier_ressources):
+            df_ressources_admin = pd.read_csv(fichier_ressources)
+            if not df_ressources_admin.empty:
+                ressource_a_supprimer = st.selectbox(
+                    "Sélectionnez une ressource à supprimer",
+                    options=[""] + df_ressources_admin['Nom'].tolist(),
+                    key="select_ressource_suppr"
+                )
+
+                if st.button("🗑️ Supprimer cette ressource", disabled=not ressource_a_supprimer):
+                    if ressource_a_supprimer:
+                        df_ressources_admin = df_ressources_admin[df_ressources_admin['Nom'] != ressource_a_supprimer]
+                        df_ressources_admin.to_csv(fichier_ressources, index=False)
+                        st.warning(f"'{ressource_a_supprimer}' a été supprimée.")
+                        st.rerun()
+
+    # Résumé des ressources
+    st.markdown("---")
+    st.markdown("### Résumé des ressources")
+
+    if os.path.exists(fichier_ressources):
+        df_resume = pd.read_csv(fichier_ressources)[['Nom', 'Source', 'Date_validation']]
+        df_resume.columns = ['Ressource', 'Organisme', 'Date ajout']
+        st.dataframe(df_resume, use_container_width=True, hide_index=True)
+
+# ================== ONGLET 8: RETOUR D'EXPÉRIENCE ==================
+with tab8:
+    st.subheader("Partager un retour d'expérience")
+
+    st.markdown("""
+    Cet espace vous permet de **partager votre expérience** sur une innovation identifiée.
+    Vos retours sont précieux pour enrichir la connaissance collective et aider d'autres programmes
+    à bénéficier de vos apprentissages.
+    """)
+
+    st.markdown("---")
+
+    # Liste des programmes WWF
+    PROGRAMMES_WWF = [
+        "Eau douce",
+        "Vie sauvage",
+        "Océans",
+        "Forêts",
+        "Agriculture et alimentation",
+        "Partenariat avec le secteur public",
+        "Guyane",
+        "Nouvelle-Calédonie",
+        "Autre"
+    ]
+
+    # Sélection du programme EN DEHORS du formulaire pour permettre le conditionnement dynamique
+    st.markdown("### Votre retour d'expérience")
+
+    # Sélection de l'innovation
+    innovation_selectionnee = st.selectbox(
+        "Innovation concernée *",
+        options=[""] + df["Innovation identifiée"].tolist(),
+        help="Sélectionnez l'innovation sur laquelle vous souhaitez partager votre expérience",
+        key="rex_innovation"
+    )
+
+    # Sélection du programme
+    col_prog1, col_prog2 = st.columns([1, 1])
+
+    with col_prog1:
+        programme_selectionne = st.selectbox(
+            "Votre programme *",
+            options=PROGRAMMES_WWF,
+            help="Sélectionnez le programme auquel vous appartenez",
+            key="rex_programme"
+        )
+
+    with col_prog2:
+        # Champ pour préciser si "Autre" est sélectionné
+        programme_autre = st.text_input(
+            "Précisez votre programme *" if programme_selectionne == "Autre" else "Précisez votre programme",
+            placeholder="Ex: Communication, Finance, etc." if programme_selectionne == "Autre" else "Sélectionnez 'Autre' pour activer ce champ",
+            disabled=(programme_selectionne != "Autre"),
+            help="Ce champ est actif uniquement si vous sélectionnez 'Autre'",
+            key="rex_programme_autre"
+        )
+
+    # Formulaire pour le reste des champs
+    with st.form("formulaire_retour_experience", clear_on_submit=True):
+        # Date optionnelle
+        col_date1, col_date2 = st.columns([1, 1])
+
+        with col_date1:
+            date_test = st.date_input(
+                "Date du test ou de la réflexion (optionnel)",
+                value=None,
+                help="Indiquez la date approximative de votre expérience avec cette innovation"
+            )
+
+        with col_date2:
+            st.empty()  # Pour équilibrer la mise en page
+
+        # Zone de texte pour le retour d'expérience
+        st.markdown("#### Décrivez votre expérience")
+        retour_experience = st.text_area(
+            "Votre retour d'expérience *",
+            placeholder="Partagez ici votre expérience avec cette innovation :\n"
+                        "- Dans quel contexte l'avez-vous testée ou envisagée ?\n"
+                        "- Quels ont été les résultats ou observations ?\n"
+                        "- Quelles difficultés avez-vous rencontrées ?\n"
+                        "- Quels conseils donneriez-vous à d'autres programmes ?",
+            height=200,
+            help="Soyez aussi précis que possible pour aider vos collègues"
+        )
+
+        # Contact optionnel
+        st.markdown("#### Vos coordonnées (optionnel)")
+        st.caption("Laisser vos coordonnées permet à d'autres collègues de vous contacter pour en savoir plus.")
+
+        col_contact1, col_contact2 = st.columns([1, 1])
+
+        with col_contact1:
+            nom_contact = st.text_input(
+                "Nom / Prénom",
+                placeholder="Ex: Marie Dupont"
+            )
+
+        with col_contact2:
+            email_contact = st.text_input(
+                "Email",
+                placeholder="Ex: mdupont@wwf.fr"
+            )
+
+        # Bouton de soumission
+        submitted_rex = st.form_submit_button("Envoyer mon retour d'expérience", type="primary")
+
+        if submitted_rex:
+            # Validation
+            erreurs = []
+            if not innovation_selectionnee:
+                erreurs.append("Veuillez sélectionner une innovation")
+            if programme_selectionne == "Autre" and not programme_autre:
+                erreurs.append("Veuillez préciser votre programme")
+            if not retour_experience or len(retour_experience.strip()) < 10:
+                erreurs.append("Veuillez décrire votre expérience (minimum 10 caractères)")
+
+            if erreurs:
+                for erreur in erreurs:
+                    st.error(erreur)
+            else:
+                # Sauvegarder le retour d'expérience
+                fichier_rex = "retours_experience.csv"
+                from datetime import datetime
+                import os
+
+                # Déterminer le programme final
+                programme_final = programme_autre if programme_selectionne == "Autre" else programme_selectionne
+
+                # Créer le DataFrame avec le nouveau retour
+                nouveau_rex = pd.DataFrame({
+                    'Date_soumission': [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+                    'Innovation': [innovation_selectionnee],
+                    'Programme': [programme_final],
+                    'Date_test': [str(date_test) if date_test else ""],
+                    'Retour_experience': [retour_experience],
+                    'Nom_contact': [nom_contact if nom_contact else ""],
+                    'Email_contact': [email_contact if email_contact else ""]
+                })
+
+                # Ajouter au fichier existant ou créer un nouveau fichier
+                if os.path.exists(fichier_rex):
+                    df_rex = pd.read_csv(fichier_rex)
+                    df_rex = pd.concat([df_rex, nouveau_rex], ignore_index=True)
+                else:
+                    df_rex = nouveau_rex
+
+                df_rex.to_csv(fichier_rex, index=False)
+                st.success("Merci pour votre retour d'expérience ! Il a été enregistré avec succès.")
+                st.balloons()
+
+    # Section pour consulter les retours existants
+    st.markdown("---")
+    st.markdown("### Consulter les retours d'expérience")
+
+    fichier_rex = "retours_experience.csv"
+    import os
+
+    if os.path.exists(fichier_rex):
+        df_rex_existants = pd.read_csv(fichier_rex)
+
+        if not df_rex_existants.empty:
+            # Filtre par innovation
+            innovations_avec_rex = df_rex_existants['Innovation'].unique().tolist()
+
+            filtre_innovation = st.selectbox(
+                "Filtrer par innovation",
+                options=["Toutes les innovations"] + sorted(innovations_avec_rex),
+                key="rex_filtre"
+            )
+
+            if filtre_innovation != "Toutes les innovations":
+                df_rex_affiche = df_rex_existants[df_rex_existants['Innovation'] == filtre_innovation]
+            else:
+                df_rex_affiche = df_rex_existants
+
+            st.caption(f"{len(df_rex_affiche)} retour(s) d'expérience")
+
+            # Afficher les retours sous forme de cartes
+            for idx, row in df_rex_affiche.iterrows():
+                with st.expander(f"**{row['Innovation']}** - {row['Programme']} ({row['Date_soumission'][:10]})"):
+                    if row.get('Date_test') and str(row['Date_test']) != "":
+                        st.caption(f"Date du test/réflexion : {row['Date_test']}")
+
+                    st.markdown(row['Retour_experience'])
+
+                    if row.get('Nom_contact') and str(row['Nom_contact']) != "":
+                        st.markdown("---")
+                        contact_info = f"**Contact** : {row['Nom_contact']}"
+                        if row.get('Email_contact') and str(row['Email_contact']) != "":
+                            contact_info += f" ({row['Email_contact']})"
+                        st.markdown(contact_info)
+        else:
+            st.info("Aucun retour d'expérience n'a encore été partagé. Soyez le premier !")
+    else:
+        st.info("Aucun retour d'expérience n'a encore été partagé. Soyez le premier !")
+
+    # Statistiques des retours
+    if os.path.exists(fichier_rex):
+        df_rex_stats = pd.read_csv(fichier_rex)
+        if not df_rex_stats.empty and len(df_rex_stats) >= 3:
+            st.markdown("---")
+            st.markdown("### Statistiques des retours")
+
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+
+            with col_stat1:
+                st.metric("Total retours", len(df_rex_stats))
+
+            with col_stat2:
+                nb_innovations = df_rex_stats['Innovation'].nunique()
+                st.metric("Innovations concernées", nb_innovations)
+
+            with col_stat3:
+                nb_programmes = df_rex_stats['Programme'].nunique()
+                st.metric("Programmes contributeurs", nb_programmes)
 
 # --- FOOTER ---
 st.sidebar.markdown("---")
-if st.sidebar.button("Recharger les donnees"):
+if st.sidebar.button("Recharger les données"):
     st.cache_data.clear()
     st.rerun()
 
-st.sidebar.info("Astuce : Vous pouvez modifier le fichier Excel et cliquer sur 'Recharger les donnees' afin de mettre a jour les visualisations")
+st.sidebar.markdown("""
+<div style="background-color: #e8f4f8; border-left: 4px solid #31708f; padding: 12px 16px; border-radius: 4px; color: #31708f; font-size: 14px;">
+    <strong>Astuce</strong> : Vous pouvez modifier le fichier Excel et cliquer sur 'Recharger les données' afin de mettre à jour les visualisations
+</div>
+""", unsafe_allow_html=True)
